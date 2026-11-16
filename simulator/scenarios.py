@@ -95,6 +95,9 @@ class StationSpec:
     upload_lag_s: tuple[float, float] = (30.0, 120.0)
     late: bool = False  # uploads only in the late phase
     note: str | None = None
+    # Intervals (reference seconds) in which the station records nothing at
+    # all — the ground truth behind a constraint book's listening blind zone.
+    deaf_windows: list[tuple[float, float]] = field(default_factory=list)
 
     def boot_at(self, reference_s: float) -> Boot:
         chosen = self.boots[0]
@@ -102,6 +105,9 @@ class StationSpec:
             if boot.covers(reference_s) and boot.boot_start_ref_s >= chosen.boot_start_ref_s:
                 chosen = boot
         return chosen
+
+    def deaf_at(self, reference_s: float) -> bool:
+        return any(lo <= reference_s <= hi for lo, hi in self.deaf_windows)
 
 
 @dataclass
@@ -113,6 +119,25 @@ class SourceSpec:
     emissions_s: list[float]
     feature: list[float]
     temporal_sigma_ms: float = 0.0
+
+
+@dataclass
+class TrackCall:
+    """One call of a moving source at a known position and instant."""
+
+    t_s: float
+    x: float
+    y: float
+
+
+@dataclass
+class TrackSpec:
+    """A moving sound source (one passage through the survey area)."""
+
+    id: str
+    class_label: str
+    calls: list[TrackCall]
+    feature: list[float]
 
 
 @dataclass
@@ -138,11 +163,17 @@ class Scenario:
     feature_noise: float = 0.015
     closure_margin_s: float = 180.0
     expected: dict = field(default_factory=dict)
+    tracks: list[TrackSpec] = field(default_factory=list)
+    # Corridor scenarios pin their sound-class feature limit and carry the
+    # constraint books + corridor expectations the driver and verifier use.
+    class_feature_limit: float | None = None
+    corridor: dict = field(default_factory=dict)
 
     def timeline_end_s(self) -> float:
         sound_end = max((e for s in self.sources for e in s.emissions_s), default=600.0)
+        track_end = max((c.t_s for t in self.tracks for c in t.calls), default=0.0)
         cal_end = max((e for c in self.cal_sources for e in c.emissions_s), default=0.0)
-        return max(sound_end, cal_end) + self.closure_margin_s
+        return max(sound_end, track_end, cal_end) + self.closure_margin_s
 
 
 BOOT_BASE_LOCAL_S = 1_158_000.0  # ~2026-11-14 on the fictional station calendar
@@ -159,6 +190,10 @@ def build_scenario(name: str) -> Scenario:
         "collinear": _collinear,
         "duplicates": _duplicates,
         "revision": _revision,
+        "crossing": _crossing,
+        "simultaneous": _simultaneous,
+        "blindgap": _blindgap,
+        "clockskew": _clockskew,
     }
     if name not in builders:
         raise KeyError(f"unknown scenario {name!r}; choose from {sorted(builders)}")
@@ -166,7 +201,10 @@ def build_scenario(name: str) -> Scenario:
 
 
 def scenario_names() -> list[str]:
-    return ["overlapping", "reboot", "collinear", "duplicates", "revision"]
+    return [
+        "overlapping", "reboot", "collinear", "duplicates", "revision",
+        "crossing", "simultaneous", "blindgap", "clockskew",
+    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -406,5 +444,372 @@ def _revision() -> Scenario:
             "superseded_by_second_run": 5,
             "late_station": "S3",
             "note": "second run's calibration hash for S1/S2 must differ from the first run",
+        },
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Corridor scenarios (活动通道候选集验证)
+#
+# Each scenario carries a ``corridor`` block: the constraint books to create,
+# the corridor runs to execute (method, book, params) and the expectations the
+# independent corridor verifier checks.  Tracks are moving sources; stations
+# with ``deaf_windows`` record nothing inside those intervals (the ground
+# truth behind a listening blind zone).
+# --------------------------------------------------------------------------- #
+def _corridor_stations() -> list[StationSpec]:
+    return [
+        StationSpec("S1", 300.0, 100.0, 1700.0, [_boots_standard()], (25.0, 70.0)),
+        StationSpec("S2", 1400.0, 150.0, 1700.0, [_boots_standard()], (40.0, 110.0)),
+        StationSpec("S3", 1050.0, 950.0, 1700.0, [_boots_standard()], (55.0, 140.0)),
+        StationSpec("S4", 550.0, 600.0, 1600.0, [_boots_standard()], (20.0, 60.0)),
+    ]
+
+
+def _corridor_cal() -> list[CalSourceSpec]:
+    return [
+        CalSourceSpec("C1", 100.0, -150.0, [-2400.0 + 115.0 * i for i in range(60)]),
+        CalSourceSpec("C2", 1650.0, 900.0, [-2280.0 + 110.0 * i for i in range(60)]),
+    ]
+
+
+# --------------------------------------------------------------------------- #
+# 6. Crossing routes (交叉路线)
+# --------------------------------------------------------------------------- #
+def _crossing() -> Scenario:
+    feature = [1.0, 0.35, 0.25, 0.88]
+    track_a = TrackSpec(
+        "TA", "chirp",
+        [TrackCall(t, x, 300.0) for t, x in
+         zip([300.0, 800.0, 1300.0, 1800.0, 2300.0], [400.0, 733.0, 1067.0, 1400.0, 1733.0])],
+        feature,
+    )
+    # TB crosses TA's line at t=1800 s, 60 m to the north: simultaneous, so a
+    # merged "lingering" chain is unreachable, but every swap at the crossing
+    # is within a hair of the pure tracks on score and must survive as a
+    # competing candidate.
+    track_b = TrackSpec(
+        "TB", "chirp",
+        [TrackCall(t, x, y) for t, x, y in zip(
+            [320.0, 820.0, 1320.0, 1800.0, 2320.0],
+            [400.0, 733.0, 1067.0, 1400.0, 1733.0],
+            [700.0, 567.0, 433.0, 360.0, 220.0],
+        )],
+        feature,
+    )
+    noise = [
+        SourceSpec("N1", "croak", 200.0, -200.0, [1000.0], [0.40, 1.00, 0.50]),
+        SourceSpec("N2", "croak", 1950.0, 950.0, [1500.0], [0.72, 0.55, 0.80]),
+    ]
+    book = {
+        "name": "wetland-standard",
+        "default_max_speed_mps": 2.0,
+        "seasonal_speed_limits": [
+            {
+                "class_label": None,
+                "season": {"start": "11-01", "end": "02-01"},
+                "max_speed_mps": 1.5,
+                "note": "winter movement cap",
+            }
+        ],
+        "impassable_zones": [],
+        "blind_zones": [],
+        "clock_uncertainties": [],
+        "default_clock_uncertainty_us": 2_000_000,
+        "notes": "standard book for the crossing scenario",
+    }
+    return Scenario(
+        name="crossing",
+        title="Two tracks crossing at one point",
+        description=(
+            "Two chirp tracks cross at (1400, 300): TA passes at t=1800 s, TB at "
+            "t=1820 s. Continuations along each track are only marginally cheaper "
+            "than swapping tracks at the crossing, so the solver must keep the "
+            "competing candidates instead of silently picking one. Two isolated "
+            "croak sources produce events no corridor should claim."
+        ),
+        stations=_corridor_stations(),
+        sources=noise,
+        cal_sources=_corridor_cal(),
+        tracks=[track_a, track_b],
+        class_feature_limit=0.25,
+        area={"x_min": -300.0, "x_max": 2100.0, "y_min": -500.0, "y_max": 1300.0},
+        expected={
+            "events": 12,
+            "track_events": 10,
+            "noise_events": 2,
+            "crossing_point": {"x": 1400.0, "y": 300.0},
+        },
+        corridor={
+            "window_s": [0.0, 3000.0],
+            "books": [book],
+            "runs": [
+                {"book": "wetland-standard", "method": "mincost_flow", "params": {}},
+                {"book": "wetland-standard", "method": "hypothesis_pruning", "params": {}},
+            ],
+            "expect": {
+                "track_events_covered": 10,
+                "unattributed_events": 2,
+                "competitors_present": True,
+                "min_corridors": 2,
+            },
+        },
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 7. Simultaneous calls (同时鸣叫)
+# --------------------------------------------------------------------------- #
+def _simultaneous() -> Scenario:
+    feature = [0.8, 0.6, 0.45, 0.7]
+    times = [400.0, 900.0, 1400.0, 1900.0, 2400.0]
+    track_a = TrackSpec(
+        "TA", "whistle",
+        [TrackCall(t, x, y) for t, x, y in zip(
+            times,
+            [500.0, 833.0, 1167.0, 1500.0, 1833.0],
+            [200.0, 300.0, 400.0, 480.0, 600.0],
+        )],
+        feature,
+    )
+    # TB calls 3 s after TA at each slot: near-simultaneous.  (Exactly
+    # coincident calls are a known boundary of the *event* layer — two-station
+    # splits fit any pair exactly — so the corridor layer is verified with a
+    # small offset, which changes nothing about corridor reachability: 3 s is
+    # far below any travel time between the two positions.)
+    track_b = TrackSpec(
+        "TB", "whistle",
+        [TrackCall(t + 3.0, x, y) for t, x, y in zip(
+            times,
+            [500.0, 833.0, 1167.0, 1500.0, 1833.0],
+            [800.0, 700.0, 600.0, 520.0, 400.0],
+        )],
+        feature,
+    )
+    book = {
+        "name": "wetland-standard",
+        "default_max_speed_mps": 2.0,
+        "seasonal_speed_limits": [
+            {
+                "class_label": None,
+                "season": {"start": "11-01", "end": "02-01"},
+                "max_speed_mps": 1.5,
+                "note": "winter movement cap",
+            }
+        ],
+        "impassable_zones": [],
+        "blind_zones": [],
+        "clock_uncertainties": [],
+        "default_clock_uncertainty_us": 2_000_000,
+        "notes": "standard book for the simultaneous scenario",
+    }
+    return Scenario(
+        name="simultaneous",
+        title="Two movers calling at the same instants",
+        description=(
+            "Two whistle tracks call at nearly identical instants (3 s apart) "
+            "from mirrored positions, converging near the centre at t=1900 s. "
+            "Near-simultaneous events can never belong to one corridor (a few "
+            "seconds with hundreds of metres between them is unreachable), and "
+            "the mirror symmetry makes the post-convergence assignment a "
+            "near-tie that must surface as tied competing candidates."
+        ),
+        stations=_corridor_stations(),
+        sources=[],
+        cal_sources=_corridor_cal(),
+        tracks=[track_a, track_b],
+        class_feature_limit=0.25,
+        area={"x_min": -300.0, "x_max": 2100.0, "y_min": -500.0, "y_max": 1300.0},
+        expected={"events": 10, "track_events": 10, "simultaneous_pairs": 5},
+        corridor={
+            "window_s": [0.0, 3000.0],
+            "books": [book],
+            "runs": [
+                {"book": "wetland-standard", "method": "mincost_flow", "params": {}},
+                {"book": "wetland-standard", "method": "hypothesis_pruning", "params": {}},
+            ],
+            "expect": {
+                "track_events_covered": 10,
+                "unattributed_events": 0,
+                "ties_present": True,
+                "min_corridors": 2,
+                "no_simultaneous_pairs_in_one_corridor": True,
+            },
+        },
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 8. Long blind zone (长盲区)
+# --------------------------------------------------------------------------- #
+def _blindgap() -> Scenario:
+    feature = [0.6, 0.3, 1.0, 0.4]
+    times = [300.0, 700.0, 1100.0, 1500.0, 1900.0, 2300.0, 2700.0, 3100.0]
+    xs = [400.0, 586.0, 772.0, 958.0, 1144.0, 1330.0, 1516.0, 1702.0]
+    ys = [400.0, 429.0, 457.0, 486.0, 514.0, 543.0, 571.0, 600.0]
+    track = TrackSpec(
+        "TA", "drum",
+        [TrackCall(t, x, y) for t, x, y in zip(times, xs, ys)],
+        feature,
+    )
+    stations = _corridor_stations()
+    for st in stations:
+        st.deaf_windows = [(1200.0, 2400.0)]
+        st.note = "recorder maintenance 1200-2400 s: nothing recorded"
+    book_with_blind = {
+        "name": "wetland-blind",
+        "default_max_speed_mps": 2.0,
+        "seasonal_speed_limits": [
+            {
+                "class_label": None,
+                "season": {"start": "11-01", "end": "02-01"},
+                "max_speed_mps": 1.5,
+                "note": "winter movement cap",
+            }
+        ],
+        "impassable_zones": [],
+        "blind_zones": [
+            {
+                "zone_id": "BZ-1",
+                "station_id": None,
+                "from_ref_at": "2026-11-14T00:20:00Z",
+                "to_ref_at": "2026-11-14T00:40:00Z",
+                "geometry": None,
+                "reason": "recorder maintenance window",
+            }
+        ],
+        "clock_uncertainties": [],
+        "default_clock_uncertainty_us": 2_000_000,
+        "notes": "v1: knows the maintenance blind zone",
+    }
+    book_no_blind = {
+        "name": "wetland-blind",
+        "default_max_speed_mps": 2.0,
+        "seasonal_speed_limits": book_with_blind["seasonal_speed_limits"],
+        "impassable_zones": [],
+        "blind_zones": [],
+        "clock_uncertainties": [],
+        "default_clock_uncertainty_us": 2_000_000,
+        "notes": "v2: same book without the blind zone",
+    }
+    return Scenario(
+        name="blindgap",
+        title="One track crossing a long listening blind zone",
+        description=(
+            "All stations are deaf from t=1200 s to t=2400 s, so the mover's "
+            "calls at 1500/1900/2300 s produce no events. The corridor must "
+            "still link the events before and after the outage, and the gap "
+            "entry must cite blind zone BZ-1 — without inventing any position "
+            "inside the gap. A second constraint-book version without the "
+            "blind zone leaves the gap unexplained."
+        ),
+        stations=stations,
+        sources=[],
+        cal_sources=_corridor_cal(),
+        tracks=[track],
+        class_feature_limit=0.25,
+        area={"x_min": -300.0, "x_max": 2100.0, "y_min": -500.0, "y_max": 1300.0},
+        expected={
+            "events": 5,
+            "track_events": 5,
+            "lost_calls": [1500.0, 1900.0, 2300.0],
+        },
+        corridor={
+            "window_s": [0.0, 3600.0],
+            "books": [book_with_blind, book_no_blind],
+            "runs": [
+                {"book": "wetland-blind", "book_version": 1, "method": "mincost_flow", "params": {}},
+                {"book": "wetland-blind", "book_version": 2, "method": "mincost_flow", "params": {}},
+            ],
+            "expect": {
+                "track_events_covered": 5,
+                "unattributed_events": 0,
+                "corridor_event_count": 5,
+                "gap_blind_zone": "BZ-1",
+                "gap_present": True,
+            },
+        },
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 9. Cross-station clock uncertainty decides an edge (时钟误差)
+# --------------------------------------------------------------------------- #
+def _clockskew() -> Scenario:
+    feature = [0.9, 0.28, 0.65, 0.5]
+    track = TrackSpec(
+        "TA", "trill",
+        [
+            TrackCall(400.0, 400.0, 400.0),
+            TrackCall(1400.0, 700.0, 450.0),
+            TrackCall(2300.0, 1950.0, 450.0),
+            TrackCall(3300.0, 2100.0, 450.0),
+        ],
+        feature,
+    )
+    base_book = {
+        "default_max_speed_mps": 1.0,
+        "seasonal_speed_limits": [],
+        "impassable_zones": [],
+        "blind_zones": [],
+        "clock_uncertainties": [],
+        "notes": "",
+    }
+    book_loose = {
+        **base_book,
+        "name": "clock-policy",
+        "default_clock_uncertainty_us": 120_000_000,
+        "notes": "v1: cross-station sync trusted to +/-120 s",
+    }
+    book_tight = {
+        **base_book,
+        "name": "clock-policy",
+        "default_clock_uncertainty_us": 2_000_000,
+        "notes": "v2: cross-station sync trusted to +/-2 s",
+    }
+    return Scenario(
+        name="clockskew",
+        title="An edge that exists only under the loose clock policy",
+        description=(
+            "The mover's middle hop covers 1250 m in 900 s against a 1.0 m/s "
+            "limit: feasible only when the constraint book widens the emission "
+            "intervals by its cross-station clock uncertainty (v1: +/-120 s) "
+            "and infeasible under the tightened v2 (+/-2 s). The two corridor "
+            "runs must record different constraint version hashes and the "
+            "candidate edge sets must differ exactly at the middle hop. The "
+            "miss cost is raised for these runs so the tight edge can pay its "
+            "way into a corridor at all."
+        ),
+        stations=_corridor_stations(),
+        sources=[],
+        cal_sources=_corridor_cal(),
+        tracks=[track],
+        class_feature_limit=0.25,
+        area={"x_min": -300.0, "x_max": 2400.0, "y_min": -500.0, "y_max": 1300.0},
+        expected={"events": 4, "track_events": 4},
+        corridor={
+            "window_s": [0.0, 4000.0],
+            "books": [book_loose, book_tight],
+            "runs": [
+                {
+                    "book": "clock-policy",
+                    "book_version": 1,
+                    "method": "mincost_flow",
+                    "params": {"miss_cost": 2.0},
+                },
+                {
+                    "book": "clock-policy",
+                    "book_version": 2,
+                    "method": "mincost_flow",
+                    "params": {"miss_cost": 2.0},
+                },
+            ],
+            "expect": {
+                "track_events_covered": 4,
+                "unattributed_events": 0,
+                "v1_corridor_event_count": 4,
+                "v2_corridor_event_counts": [2, 2],
+                "edge_breaks_at_call_index": 2,
+            },
         },
     )

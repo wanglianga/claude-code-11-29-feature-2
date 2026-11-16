@@ -1641,6 +1641,564 @@
           }
         ]
       }
+    },
+    "/constraint-books": {
+      "post": {
+        "tags": [
+          "corridors"
+        ],
+        "summary": "Create a versioned constraint book (immutable)",
+        "operationId": "create_constraint_book_constraint_books_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConstraintBookCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConstraintBookOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "corridors"
+        ],
+        "summary": "List constraint books (all versions)",
+        "operationId": "list_constraint_books_constraint_books_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ConstraintBookOut"
+                  },
+                  "title": "Response List Constraint Books Constraint Books Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      }
+    },
+    "/constraint-books/{book_id}": {
+      "get": {
+        "tags": [
+          "corridors"
+        ],
+        "summary": "Fetch one constraint book version",
+        "operationId": "get_constraint_book_constraint_books__book_id__get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Book Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConstraintBookOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      }
+    },
+    "/corridor-runs": {
+      "post": {
+        "tags": [
+          "corridors"
+        ],
+        "summary": "Solve activity corridors over a whole window",
+        "description": "Run one corridor solver over the frozen event window.\n\nThe solver always sees the *whole* window before publishing anything;\nboth methods keep competing candidates when scores tie within\n``tie_epsilon``.  Corridors are anonymous: no individual identity is\nproduced, and gaps carry no interpolated coordinates.",
+        "operationId": "create_corridor_run_corridor_runs_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorridorRunRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorridorRunOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "corridors"
+        ],
+        "summary": "List corridor runs",
+        "operationId": "list_corridor_runs_corridor_runs_get",
+        "parameters": [
+          {
+            "name": "include_stale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Include Stale"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CorridorRunOut"
+                  },
+                  "title": "Response List Corridor Runs Corridor Runs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      }
+    },
+    "/corridor-runs/{run_id}": {
+      "get": {
+        "tags": [
+          "corridors"
+        ],
+        "summary": "Fetch a corridor run with its frozen snapshot summary",
+        "operationId": "get_corridor_run_corridor_runs__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorridorRunOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      }
+    },
+    "/corridor-runs/{run_id}/corridors": {
+      "get": {
+        "tags": [
+          "corridors"
+        ],
+        "summary": "List the corridor candidates of one run",
+        "operationId": "list_run_corridors_corridor_runs__run_id__corridors_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorridorList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      }
+    },
+    "/corridor-runs/{run_id}/unattributed": {
+      "get": {
+        "tags": [
+          "corridors"
+        ],
+        "summary": "Events in the window no corridor claimed, with reasons",
+        "operationId": "list_unattributed_corridor_runs__run_id__unattributed_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnattributedList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      }
+    },
+    "/corridors/{corridor_id}": {
+      "get": {
+        "tags": [
+          "corridors"
+        ],
+        "summary": "Corridor detail: linked events, edge constraints, competitors, gaps",
+        "operationId": "get_corridor_corridors__corridor_id__get",
+        "parameters": [
+          {
+            "name": "corridor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Corridor Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorridorDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      }
+    },
+    "/corridors/{corridor_id}/confirm": {
+      "post": {
+        "tags": [
+          "corridors"
+        ],
+        "summary": "Manually confirm a corridor candidate",
+        "operationId": "confirm_corridor_corridors__corridor_id__confirm_post",
+        "parameters": [
+          {
+            "name": "corridor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Corridor Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorridorConfirmRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorridorConfirmationOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "corridors"
+        ],
+        "summary": "Manually revoke a confirmation (the only way a confirmation goes away)",
+        "operationId": "revoke_corridor_confirmation_corridors__corridor_id__confirm_delete",
+        "parameters": [
+          {
+            "name": "corridor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Corridor Id"
+            }
+          },
+          {
+            "name": "actor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "investigator",
+              "title": "Actor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorridorConfirmationOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -1725,6 +2283,66 @@
           "progress_recorded"
         ],
         "title": "BatchResponse"
+      },
+      "BlindZone": {
+        "properties": {
+          "zone_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Zone Id"
+          },
+          "station_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Station Id",
+            "description": "Scope to one station; null = whole network"
+          },
+          "from_ref_at": {
+            "type": "string",
+            "title": "From Ref At"
+          },
+          "to_ref_at": {
+            "type": "string",
+            "title": "To Ref At"
+          },
+          "geometry": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImpassableZone"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional spatial footprint; null = applies everywhere"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "zone_id",
+          "from_ref_at",
+          "to_ref_at"
+        ],
+        "title": "BlindZone"
       },
       "CalibrationList": {
         "properties": {
@@ -2162,6 +2780,43 @@
         ],
         "title": "ClassOut"
       },
+      "ClockUncertaintyRule": {
+        "properties": {
+          "station_a": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Station A"
+          },
+          "station_b": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Station B"
+          },
+          "uncertainty_us": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Uncertainty Us"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "uncertainty_us"
+        ],
+        "title": "ClockUncertaintyRule"
+      },
       "ConflictOut": {
         "properties": {
           "id": {
@@ -2233,6 +2888,737 @@
           "resolution_note"
         ],
         "title": "ConflictOut"
+      },
+      "ConstraintBookCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "default_max_speed_mps": {
+            "type": "number",
+            "maximum": 1000.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Default Max Speed Mps"
+          },
+          "seasonal_speed_limits": {
+            "items": {
+              "$ref": "#/components/schemas/SeasonalSpeedLimit"
+            },
+            "type": "array",
+            "title": "Seasonal Speed Limits"
+          },
+          "impassable_zones": {
+            "items": {
+              "$ref": "#/components/schemas/ImpassableZone"
+            },
+            "type": "array",
+            "title": "Impassable Zones"
+          },
+          "blind_zones": {
+            "items": {
+              "$ref": "#/components/schemas/BlindZone"
+            },
+            "type": "array",
+            "title": "Blind Zones"
+          },
+          "clock_uncertainties": {
+            "items": {
+              "$ref": "#/components/schemas/ClockUncertaintyRule"
+            },
+            "type": "array",
+            "title": "Clock Uncertainties"
+          },
+          "default_clock_uncertainty_us": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Default Clock Uncertainty Us",
+            "default": 0
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "created_by": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Created By",
+            "default": "investigator"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "default_max_speed_mps"
+        ],
+        "title": "ConstraintBookCreate"
+      },
+      "ConstraintBookOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "version_hash": {
+            "type": "string",
+            "title": "Version Hash"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "default_max_speed_mps": {
+            "type": "number",
+            "title": "Default Max Speed Mps"
+          },
+          "seasonal_speed_limits": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Seasonal Speed Limits"
+          },
+          "impassable_zones": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Impassable Zones"
+          },
+          "blind_zones": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Blind Zones"
+          },
+          "clock_uncertainties": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Clock Uncertainties"
+          },
+          "default_clock_uncertainty_us": {
+            "type": "integer",
+            "title": "Default Clock Uncertainty Us"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "version",
+          "version_hash",
+          "status",
+          "default_max_speed_mps",
+          "seasonal_speed_limits",
+          "impassable_zones",
+          "blind_zones",
+          "clock_uncertainties",
+          "default_clock_uncertainty_us",
+          "notes",
+          "created_by",
+          "created_at"
+        ],
+        "title": "ConstraintBookOut"
+      },
+      "CorridorCompetitorOut": {
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "title": "Seq"
+          },
+          "event_id": {
+            "type": "integer",
+            "title": "Event Id"
+          },
+          "replaces_event_id": {
+            "type": "integer",
+            "title": "Replaces Event Id"
+          },
+          "delta_score": {
+            "type": "number",
+            "title": "Delta Score"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "seq",
+          "event_id",
+          "replaces_event_id",
+          "delta_score",
+          "reason"
+        ],
+        "title": "CorridorCompetitorOut"
+      },
+      "CorridorConfirmRequest": {
+        "properties": {
+          "confirmed_by": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Confirmed By",
+            "default": "investigator"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "CorridorConfirmRequest"
+      },
+      "CorridorConfirmationOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "corridor_id": {
+            "type": "integer",
+            "title": "Corridor Id"
+          },
+          "confirmed_by": {
+            "type": "string",
+            "title": "Confirmed By"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "conflict": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conflict"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "corridor_id",
+          "confirmed_by",
+          "note",
+          "active",
+          "status",
+          "conflict",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "CorridorConfirmationOut"
+      },
+      "CorridorDetail": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "run_id": {
+            "type": "integer",
+            "title": "Run Id"
+          },
+          "corridor_key": {
+            "type": "string",
+            "title": "Corridor Key"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "rank": {
+            "type": "integer",
+            "title": "Rank"
+          },
+          "tie_group": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tie Group"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "event_count": {
+            "type": "integer",
+            "title": "Event Count"
+          },
+          "first_emission": {
+            "type": "string",
+            "title": "First Emission"
+          },
+          "last_emission": {
+            "type": "string",
+            "title": "Last Emission"
+          },
+          "identity_note": {
+            "type": "string",
+            "title": "Identity Note",
+            "default": "anonymous candidate corridor; no individual identity assigned"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/CorridorMemberOut"
+            },
+            "type": "array",
+            "title": "Members"
+          },
+          "competitors": {
+            "items": {
+              "$ref": "#/components/schemas/CorridorCompetitorOut"
+            },
+            "type": "array",
+            "title": "Competitors"
+          },
+          "gaps": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Gaps",
+            "description": "Time gaps between members; never carries coordinates"
+          },
+          "unattributed": {
+            "items": {
+              "$ref": "#/components/schemas/UnattributedOut"
+            },
+            "type": "array",
+            "title": "Unattributed",
+            "description": "Events in the same window this corridor's solution did not attribute"
+          },
+          "confirmations": {
+            "items": {
+              "$ref": "#/components/schemas/CorridorConfirmationOut"
+            },
+            "type": "array",
+            "title": "Confirmations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "run_id",
+          "corridor_key",
+          "score",
+          "rank",
+          "tie_group",
+          "status",
+          "event_count",
+          "first_emission",
+          "last_emission",
+          "members",
+          "competitors",
+          "gaps",
+          "unattributed",
+          "confirmations"
+        ],
+        "title": "CorridorDetail"
+      },
+      "CorridorList": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "corridors": {
+            "items": {
+              "$ref": "#/components/schemas/CorridorOut"
+            },
+            "type": "array",
+            "title": "Corridors"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "corridors"
+        ],
+        "title": "CorridorList"
+      },
+      "CorridorMemberOut": {
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "title": "Seq"
+          },
+          "event_id": {
+            "type": "integer",
+            "title": "Event Id"
+          },
+          "edge_to_next": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edge To Next",
+            "description": "Reachability explanation to the next member (constraints applied); null on last"
+          }
+        },
+        "type": "object",
+        "required": [
+          "seq",
+          "event_id"
+        ],
+        "title": "CorridorMemberOut"
+      },
+      "CorridorOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "run_id": {
+            "type": "integer",
+            "title": "Run Id"
+          },
+          "corridor_key": {
+            "type": "string",
+            "title": "Corridor Key"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "rank": {
+            "type": "integer",
+            "title": "Rank"
+          },
+          "tie_group": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tie Group"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "event_count": {
+            "type": "integer",
+            "title": "Event Count"
+          },
+          "first_emission": {
+            "type": "string",
+            "title": "First Emission"
+          },
+          "last_emission": {
+            "type": "string",
+            "title": "Last Emission"
+          },
+          "identity_note": {
+            "type": "string",
+            "title": "Identity Note",
+            "default": "anonymous candidate corridor; no individual identity assigned"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "run_id",
+          "corridor_key",
+          "score",
+          "rank",
+          "tie_group",
+          "status",
+          "event_count",
+          "first_emission",
+          "last_emission"
+        ],
+        "title": "CorridorOut"
+      },
+      "CorridorRunOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "batch_id": {
+            "type": "string",
+            "title": "Batch Id"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "window": {
+            "type": "object",
+            "title": "Window"
+          },
+          "constraint_book_id": {
+            "type": "integer",
+            "title": "Constraint Book Id"
+          },
+          "constraint_version_hash": {
+            "type": "string",
+            "title": "Constraint Version Hash"
+          },
+          "params": {
+            "type": "object",
+            "title": "Params"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "stale_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stale Reason"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "batch_id",
+          "method",
+          "status",
+          "window",
+          "constraint_book_id",
+          "constraint_version_hash",
+          "params",
+          "summary",
+          "stale_reason",
+          "created_by",
+          "created_at",
+          "finished_at"
+        ],
+        "title": "CorridorRunOut"
+      },
+      "CorridorRunRequest": {
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": [
+              "mincost_flow",
+              "hypothesis_pruning"
+            ],
+            "title": "Method",
+            "default": "mincost_flow"
+          },
+          "window_start": {
+            "type": "string",
+            "title": "Window Start",
+            "description": "ISO-8601 UTC; events overlapping the window are frozen"
+          },
+          "window_end": {
+            "type": "string",
+            "title": "Window End"
+          },
+          "constraint_book_id": {
+            "type": "integer",
+            "title": "Constraint Book Id"
+          },
+          "miss_cost": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Miss Cost",
+            "description": "\u7f3a\u6d4b\u4ee3\u4ef7: reward for explaining an event; overrides the configured default"
+          },
+          "tie_epsilon": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tie Epsilon"
+          },
+          "beam_width": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 256.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Beam Width"
+          },
+          "min_events": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 50.0,
+                "minimum": 2.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Events"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "window_start",
+          "window_end",
+          "constraint_book_id"
+        ],
+        "title": "CorridorRunRequest"
       },
       "EventDetail": {
         "properties": {
@@ -2757,6 +4143,93 @@
           "version"
         ],
         "title": "HealthResponse"
+      },
+      "ImpassableZone": {
+        "properties": {
+          "zone_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Zone Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "circle",
+              "polygon"
+            ],
+            "title": "Kind"
+          },
+          "x": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "X"
+          },
+          "y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Y"
+          },
+          "radius_m": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Radius M"
+          },
+          "points": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Points"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "zone_id",
+          "kind"
+        ],
+        "title": "ImpassableZone"
       },
       "IngestionCounts": {
         "properties": {
@@ -3462,6 +4935,51 @@
         "type": "object",
         "title": "RunRequest"
       },
+      "SeasonalSpeedLimit": {
+        "properties": {
+          "class_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Label",
+            "description": "Sound class this rule applies to; null = wildcard"
+          },
+          "season": {
+            "type": "object",
+            "title": "Season",
+            "description": "{\"start\": \"MM-DD\", \"end\": \"MM-DD\"}; may wrap the year end"
+          },
+          "max_speed_mps": {
+            "type": "number",
+            "maximum": 1000.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Max Speed Mps"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "season",
+          "max_speed_mps"
+        ],
+        "title": "SeasonalSpeedLimit"
+      },
       "SelectOptionRequest": {
         "properties": {
           "option_id": {
@@ -3692,6 +5210,55 @@
           "latest_run"
         ],
         "title": "StatsSummary"
+      },
+      "UnattributedList": {
+        "properties": {
+          "run_id": {
+            "type": "integer",
+            "title": "Run Id"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/UnattributedOut"
+            },
+            "type": "array",
+            "title": "Events"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "total",
+          "events"
+        ],
+        "title": "UnattributedList"
+      },
+      "UnattributedOut": {
+        "properties": {
+          "event_id": {
+            "type": "integer",
+            "title": "Event Id"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "detail": {
+            "type": "object",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_id",
+          "reason",
+          "detail"
+        ],
+        "title": "UnattributedOut"
       },
       "ValidationError": {
         "properties": {

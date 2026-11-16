@@ -143,6 +143,42 @@ def build_truth(scn: Scenario) -> dict:
                 TruthEvent(source.id, index, source.class_label, source.x, source.y, emission_s, heard)
             )
 
+    # Moving sources: one row per call per hearing station, exactly like a
+    # static source but with the call's own position.  Stations inside a
+    # deaf window record nothing (listening blind zone ground truth).
+    for track in scn.tracks:
+        for index, call in enumerate(track.calls):
+            emission_us = us(REFERENCE_EPOCH + timedelta(seconds=call.t_s))
+            heard = []
+            for st in scn.stations:
+                d = math.hypot(st.x - call.x, st.y - call.y)
+                if d > st.radius or st.deaf_at(call.t_s):
+                    continue
+                heard.append(st.id)
+                boot = st.boot_at(call.t_s)
+                arrival_us = int(round(emission_us + d / SPEED_MPS * 1_000_000.0))
+                make_row(
+                    "sound",
+                    station_id=st.id,
+                    boot_id=boot.boot_id,
+                    kind="sound",
+                    class_label=track.class_label,
+                    local_capture_us=boot.local_us(arrival_us),
+                    arrival_us=arrival_us,
+                    features=[
+                        round(v + rng.gauss(0.0, scn.feature_noise), 6) for v in track.feature
+                    ],
+                    uncertainty_ms=scn.observation_uncertainty_ms,
+                    emission_us=emission_us,
+                    truth_source=track.id,
+                    truth_call_index=index,
+                    late=st.late,
+                )
+                sounds.append(rows[-1])
+            events.append(
+                TruthEvent(track.id, index, track.class_label, call.x, call.y, call.t_s, heard)
+            )
+
     for station_id, boot_id in sorted({(r["station_id"], r["boot_id"]) for r in rows}):
         boot_rows = [r for r in rows if r["station_id"] == station_id and r["boot_id"] == boot_id]
         boot_rows.sort(key=lambda r: r["local_capture_us"])
@@ -276,6 +312,19 @@ def write_ground_truth(scn: Scenario, out_dir: Path) -> dict:
             }
             for e in truth["events"]
         ],
+        "tracks": [
+            {
+                "track_id": t.id,
+                "class_label": t.class_label,
+                "feature": t.feature,
+                "calls": [
+                    {"call_index": i, "t_s": c.t_s, "x": c.x, "y": c.y, "emission": ref_iso(c.t_s)}
+                    for i, c in enumerate(t.calls)
+                ],
+            }
+            for t in scn.tracks
+        ],
+        "corridor": scn.corridor,
         "waves": [
             {
                 "station_id": w["station_id"],
@@ -436,9 +485,13 @@ def setup(scn: Scenario, api: Api) -> float:
         ),
         default=1.0,
     )
-    for class_label in sorted({s.class_label for s in scn.sources}):
-        dim = len(next(s for s in scn.sources if s.class_label == class_label).feature)
-        api.ensure_class(class_label, dim, limit=_feature_limit(scn, class_label, pair_limit))
+    all_features = [s.feature for s in scn.sources] + [t.feature for t in scn.tracks]
+    classes = {s.class_label: s.feature for s in scn.sources}
+    classes.update({t.class_label: t.feature for t in scn.tracks})
+    for class_label in sorted(classes):
+        dim = len(classes[class_label])
+        limit = scn.class_feature_limit or _feature_limit(scn, class_label, pair_limit)
+        api.ensure_class(class_label, dim, limit=limit)
     for cal in scn.cal_sources:
         api.ensure_cal_source(cal)
     return pair_limit

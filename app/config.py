@@ -95,6 +95,18 @@ class Settings:
     # Processing
     max_run_observations: int = _env_int("MAX_RUN_OBSERVATIONS", 20000)
 
+    # Corridors (活动通道候选集)
+    corridor_miss_cost: float = _env_float("CORRIDOR_MISS_COST", 1.0)
+    corridor_tie_epsilon: float = _env_float("CORRIDOR_TIE_EPSILON", 0.05)
+    corridor_feature_weight: float = _env_float("CORRIDOR_FEATURE_WEIGHT", 1.0)
+    corridor_min_events: int = _env_int("CORRIDOR_MIN_EVENTS", 2)
+    corridor_max_edge_gap_s: float = _env_float("CORRIDOR_MAX_EDGE_GAP_S", 7200.0)
+    corridor_gap_explain_s: float = _env_float("CORRIDOR_GAP_EXPLAIN_S", 600.0)
+    corridor_beam_width: int = _env_int("CORRIDOR_BEAM_WIDTH", 24)
+    corridor_max_corridors: int = _env_int("CORRIDOR_MAX_CORRIDORS", 64)
+    corridor_max_tie_alternates: int = _env_int("CORRIDOR_MAX_TIE_ALTERNATES", 8)
+    corridor_max_events: int = _env_int("CORRIDOR_MAX_EVENTS", 400)
+
     def as_dict(self) -> dict:
         data = asdict(self)
         data["samples_dir"] = str(self.samples_dir)

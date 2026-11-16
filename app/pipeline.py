@@ -991,6 +991,11 @@ def _finish_run(ctx: PipelineContext, created_event_ids: list[int]) -> None:
         log.append({"phase": "finalize", "status": "done", "at": iso(now_us())})
     run.phase_log = log
     ctx.db.flush()
+    # Corridor layer: late or revised events invalidate only the corridor
+    # runs whose windows overlap the affected interval (adjacent windows).
+    from . import corridor_pipeline
+
+    corridor_pipeline.invalidate_for_processing_run(ctx.db, run.id)
 
 
 def _audit(db: Session, run: ProcessingRun, action: str, detail: dict) -> None:

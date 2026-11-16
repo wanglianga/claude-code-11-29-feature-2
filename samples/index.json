@@ -33,5 +33,33 @@
     "truth_events": 5,
     "waves": 7,
     "records": 340
+  },
+  "crossing": {
+    "title": "Two tracks crossing at one point",
+    "stations": 4,
+    "truth_events": 12,
+    "waves": 8,
+    "records": 527
+  },
+  "simultaneous": {
+    "title": "Two movers calling at the same instants",
+    "stations": 4,
+    "truth_events": 10,
+    "waves": 8,
+    "records": 520
+  },
+  "blindgap": {
+    "title": "One track crossing a long listening blind zone",
+    "stations": 4,
+    "truth_events": 8,
+    "waves": 8,
+    "records": 500
+  },
+  "clockskew": {
+    "title": "An edge that exists only under the loose clock policy",
+    "stations": 4,
+    "truth_events": 4,
+    "waves": 8,
+    "records": 495
   }
 }

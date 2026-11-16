@@ -386,3 +386,196 @@ class StatsSummary(BaseModel):
     runs: dict
     events: dict
     latest_run: RunOut | None
+
+
+# --------------------------------------------------------------------------- #
+# Constraint books (约束册)
+# --------------------------------------------------------------------------- #
+class SeasonalSpeedLimit(JsonModel):
+    class_label: str | None = Field(
+        default=None, description="Sound class this rule applies to; null = wildcard"
+    )
+    season: dict = Field(description='{"start": "MM-DD", "end": "MM-DD"}; may wrap the year end')
+    max_speed_mps: float = Field(gt=0, le=1000)
+    note: str | None = None
+
+
+class ImpassableZone(JsonModel):
+    zone_id: str = Field(min_length=1, max_length=64)
+    kind: Literal["circle", "polygon"]
+    x: float | None = None
+    y: float | None = None
+    radius_m: float | None = Field(default=None, gt=0)
+    points: list[list[float]] | None = None
+    reason: str | None = None
+
+
+class BlindZone(JsonModel):
+    zone_id: str = Field(min_length=1, max_length=64)
+    station_id: str | None = Field(
+        default=None, description="Scope to one station; null = whole network"
+    )
+    from_ref_at: str
+    to_ref_at: str
+    geometry: ImpassableZone | None = Field(
+        default=None, description="Optional spatial footprint; null = applies everywhere"
+    )
+    reason: str | None = None
+
+    @field_validator("from_ref_at", "to_ref_at")
+    @classmethod
+    def _ref_iso(cls, v: str) -> str:
+        parse_iso(v)
+        return v.strip()
+
+
+class ClockUncertaintyRule(JsonModel):
+    station_a: str | None = None
+    station_b: str | None = None
+    uncertainty_us: int = Field(gt=0)
+
+
+class ConstraintBookCreate(JsonModel):
+    name: str = Field(min_length=1, max_length=128)
+    default_max_speed_mps: float = Field(gt=0, le=1000)
+    seasonal_speed_limits: list[SeasonalSpeedLimit] = Field(default_factory=list)
+    impassable_zones: list[ImpassableZone] = Field(default_factory=list)
+    blind_zones: list[BlindZone] = Field(default_factory=list)
+    clock_uncertainties: list[ClockUncertaintyRule] = Field(default_factory=list)
+    default_clock_uncertainty_us: int = Field(default=0, ge=0)
+    notes: str | None = None
+    created_by: str = Field(default="investigator", min_length=1, max_length=128)
+
+
+class ConstraintBookOut(BaseModel):
+    id: int
+    name: str
+    version: int
+    version_hash: str
+    status: str
+    default_max_speed_mps: float
+    seasonal_speed_limits: list[dict]
+    impassable_zones: list[dict]
+    blind_zones: list[dict]
+    clock_uncertainties: list[dict]
+    default_clock_uncertainty_us: int
+    notes: str | None
+    created_by: str
+    created_at: str
+
+
+# --------------------------------------------------------------------------- #
+# Corridor runs & corridors (活动通道候选集)
+# --------------------------------------------------------------------------- #
+class CorridorRunRequest(JsonModel):
+    method: Literal["mincost_flow", "hypothesis_pruning"] = "mincost_flow"
+    window_start: str = Field(description="ISO-8601 UTC; events overlapping the window are frozen")
+    window_end: str
+    constraint_book_id: int
+    miss_cost: float | None = Field(
+        default=None, gt=0, le=1000,
+        description="缺测代价: reward for explaining an event; overrides the configured default",
+    )
+    tie_epsilon: float | None = Field(default=None, ge=0, le=10)
+    beam_width: int | None = Field(default=None, ge=1, le=256)
+    min_events: int | None = Field(default=None, ge=2, le=50)
+    created_by: str | None = Field(default=None, max_length=128)
+
+    @field_validator("window_start", "window_end")
+    @classmethod
+    def _window_iso(cls, v: str) -> str:
+        parse_iso(v)
+        return v.strip()
+
+
+class CorridorRunOut(BaseModel):
+    id: int
+    batch_id: str
+    method: str
+    status: str
+    window: dict
+    constraint_book_id: int
+    constraint_version_hash: str
+    params: dict
+    summary: dict | None
+    stale_reason: str | None
+    created_by: str | None
+    created_at: str
+    finished_at: str | None
+
+
+class CorridorOut(BaseModel):
+    id: int
+    run_id: int
+    corridor_key: str
+    score: float
+    rank: int
+    tie_group: int | None
+    status: str
+    event_count: int
+    first_emission: str
+    last_emission: str
+    identity_note: str = "anonymous candidate corridor; no individual identity assigned"
+
+
+class CorridorMemberOut(BaseModel):
+    seq: int
+    event_id: int
+    edge_to_next: dict | None = Field(
+        default=None,
+        description="Reachability explanation to the next member (constraints applied); null on last",
+    )
+
+
+class CorridorCompetitorOut(BaseModel):
+    seq: int
+    event_id: int
+    replaces_event_id: int
+    delta_score: float
+    reason: str
+
+
+class CorridorConfirmationOut(BaseModel):
+    id: int
+    corridor_id: int
+    confirmed_by: str
+    note: str | None
+    active: bool
+    status: str
+    conflict: dict | None
+    created_at: str
+    updated_at: str
+
+
+class UnattributedOut(BaseModel):
+    event_id: int
+    reason: str
+    detail: dict
+
+
+class CorridorDetail(CorridorOut):
+    members: list[CorridorMemberOut]
+    competitors: list[CorridorCompetitorOut]
+    gaps: list[dict] = Field(
+        description="Time gaps between members; never carries coordinates"
+    )
+    unattributed: list[UnattributedOut] = Field(
+        description="Events in the same window this corridor's solution did not attribute"
+    )
+    confirmations: list[CorridorConfirmationOut]
+
+
+class CorridorList(BaseModel):
+    total: int
+    corridors: list[CorridorOut]
+
+
+class UnattributedList(BaseModel):
+    run_id: int
+    total: int
+    events: list[UnattributedOut]
+
+
+class CorridorConfirmRequest(JsonModel):
+    confirmed_by: str = Field(default="investigator", min_length=1, max_length=128)
+    note: str | None = Field(default=None, max_length=2000)

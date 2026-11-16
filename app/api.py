@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from . import pipeline, schemas
+from . import constraints as constraint_eval
+from . import corridor_pipeline, pipeline, schemas
 from .config import settings
 from .db import Base, engine, get_db
 from .ingest import ingest_batch, ingest_progress, parse_local_us_iso
@@ -14,6 +15,13 @@ from .models import (
     AuditLog,
     CalibrationModel,
     CalibrationSourceRecord,
+    ConstraintBook,
+    Corridor,
+    CorridorCompetitor,
+    CorridorConfirmation,
+    CorridorEvent,
+    CorridorRun,
+    CorridorUnattributed,
     Event,
     EventExclusion,
     EventObservation,
@@ -1090,3 +1098,386 @@ def stats(db: Session = Depends(get_db)):
         events=events,
         latest_run=_run_out(latest) if latest else None,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Constraint books (约束册)
+# --------------------------------------------------------------------------- #
+def _book_out(row: ConstraintBook) -> schemas.ConstraintBookOut:
+    return schemas.ConstraintBookOut(
+        id=row.id,
+        name=row.name,
+        version=row.version,
+        version_hash=row.version_hash,
+        status=row.status,
+        default_max_speed_mps=row.default_max_speed_mps,
+        seasonal_speed_limits=row.seasonal_speed_limits_json or [],
+        impassable_zones=row.impassable_zones_json or [],
+        blind_zones=row.blind_zones_json or [],
+        clock_uncertainties=row.clock_uncertainties_json or [],
+        default_clock_uncertainty_us=row.default_clock_uncertainty_us,
+        notes=row.notes,
+        created_by=row.created_by,
+        created_at=iso(row.created_at_us),
+    )
+
+
+@router.post(
+    "/constraint-books",
+    response_model=schemas.ConstraintBookOut,
+    status_code=201,
+    tags=["corridors"],
+    summary="Create a versioned constraint book (immutable)",
+)
+def create_constraint_book(body: schemas.ConstraintBookCreate, db: Session = Depends(get_db)):
+    content = {
+        "default_max_speed_mps": body.default_max_speed_mps,
+        "seasonal_speed_limits": [r.model_dump() for r in body.seasonal_speed_limits],
+        "impassable_zones": [z.model_dump() for z in body.impassable_zones],
+        "blind_zones": [z.model_dump() for z in body.blind_zones],
+        "clock_uncertainties": [r.model_dump() for r in body.clock_uncertainties],
+        "default_clock_uncertainty_us": body.default_clock_uncertainty_us,
+    }
+    problems = constraint_eval.validate_book(content)
+    if problems:
+        raise HTTPException(422, {"detail": "constraint book rejected", "problems": problems})
+    latest = db.execute(
+        select(func.max(ConstraintBook.version)).where(ConstraintBook.name == body.name)
+    ).scalar()
+    version = (latest or 0) + 1
+    row = ConstraintBook(
+        name=body.name,
+        version=version,
+        version_hash=constraint_eval.book_version_hash(content),
+        status="active",
+        default_max_speed_mps=body.default_max_speed_mps,
+        seasonal_speed_limits_json=content["seasonal_speed_limits"],
+        impassable_zones_json=content["impassable_zones"],
+        blind_zones_json=content["blind_zones"],
+        clock_uncertainties_json=content["clock_uncertainties"],
+        default_clock_uncertainty_us=body.default_clock_uncertainty_us,
+        notes=body.notes,
+        created_by=body.created_by,
+        created_at_us=now_us(),
+    )
+    db.add(row)
+    db.add(
+        AuditLog(
+            actor=body.created_by,
+            action="constraint_book.create",
+            target_type="constraint_book",
+            target_id=f"{body.name}@v{version}",
+            detail={"version_hash": row.version_hash},
+            created_at_us=now_us(),
+        )
+    )
+    db.commit()
+    return _book_out(row)
+
+
+@router.get(
+    "/constraint-books",
+    response_model=list[schemas.ConstraintBookOut],
+    tags=["corridors"],
+    summary="List constraint books (all versions)",
+)
+def list_constraint_books(name: str | None = None, db: Session = Depends(get_db)):
+    stmt = select(ConstraintBook).order_by(ConstraintBook.name, ConstraintBook.version)
+    if name:
+        stmt = stmt.where(ConstraintBook.name == name)
+    return [_book_out(r) for r in db.execute(stmt).scalars()]
+
+
+@router.get(
+    "/constraint-books/{book_id}",
+    response_model=schemas.ConstraintBookOut,
+    tags=["corridors"],
+    summary="Fetch one constraint book version",
+)
+def get_constraint_book(book_id: int, db: Session = Depends(get_db)):
+    row = db.get(ConstraintBook, book_id)
+    if not row:
+        raise HTTPException(404, "constraint book not found")
+    return _book_out(row)
+
+
+# --------------------------------------------------------------------------- #
+# Corridor runs (活动通道候选集求解)
+# --------------------------------------------------------------------------- #
+def _corridor_run_out(run: CorridorRun) -> schemas.CorridorRunOut:
+    return schemas.CorridorRunOut(
+        id=run.id,
+        batch_id=run.batch_id,
+        method=run.method,
+        status=run.status,
+        window={"start": iso(run.window_start_us), "end": iso(run.window_end_us)},
+        constraint_book_id=run.constraint_book_id,
+        constraint_version_hash=run.constraint_version_hash,
+        params=run.params_json or {},
+        summary=run.summary_json,
+        stale_reason=run.stale_reason,
+        created_by=run.created_by,
+        created_at=iso(run.created_at_us),
+        finished_at=iso(run.finished_at_us),
+    )
+
+
+@router.post(
+    "/corridor-runs",
+    response_model=schemas.CorridorRunOut,
+    status_code=201,
+    tags=["corridors"],
+    summary="Solve activity corridors over a whole window",
+)
+def create_corridor_run(body: schemas.CorridorRunRequest, db: Session = Depends(get_db)):
+    """Run one corridor solver over the frozen event window.
+
+    The solver always sees the *whole* window before publishing anything;
+    both methods keep competing candidates when scores tie within
+    ``tie_epsilon``.  Corridors are anonymous: no individual identity is
+    produced, and gaps carry no interpolated coordinates.
+    """
+    params: dict = {}
+    if body.miss_cost is not None:
+        params["miss_cost"] = body.miss_cost
+    if body.tie_epsilon is not None:
+        params["tie_epsilon"] = body.tie_epsilon
+    if body.beam_width is not None:
+        params["beam_width"] = body.beam_width
+    if body.min_events is not None:
+        params["min_events"] = body.min_events
+    try:
+        run = corridor_pipeline.create_corridor_run(
+            db,
+            method=body.method,
+            window_start_us=to_us(body.window_start),
+            window_end_us=to_us(body.window_end),
+            constraint_book_id=body.constraint_book_id,
+            params=params,
+            created_by=body.created_by,
+        )
+    except KeyError:
+        raise HTTPException(404, "constraint book not found")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    db.commit()
+    try:
+        corridor_pipeline.execute_corridor_run(db, run)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(500, f"corridor run failed: {exc}")
+    return _corridor_run_out(db.get(CorridorRun, run.id))
+
+
+@router.get(
+    "/corridor-runs",
+    response_model=list[schemas.CorridorRunOut],
+    tags=["corridors"],
+    summary="List corridor runs",
+)
+def list_corridor_runs(
+    include_stale: bool = True,
+    limit: int = Query(20, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    stmt = select(CorridorRun).order_by(CorridorRun.id.desc()).limit(limit)
+    if not include_stale:
+        stmt = stmt.where(CorridorRun.status != "stale")
+    return [_corridor_run_out(r) for r in db.execute(stmt).scalars()]
+
+
+@router.get(
+    "/corridor-runs/{run_id}",
+    response_model=schemas.CorridorRunOut,
+    tags=["corridors"],
+    summary="Fetch a corridor run with its frozen snapshot summary",
+)
+def get_corridor_run(run_id: int, db: Session = Depends(get_db)):
+    run = db.get(CorridorRun, run_id)
+    if not run:
+        raise HTTPException(404, "corridor run not found")
+    return _corridor_run_out(run)
+
+
+@router.get(
+    "/corridor-runs/{run_id}/corridors",
+    response_model=schemas.CorridorList,
+    tags=["corridors"],
+    summary="List the corridor candidates of one run",
+)
+def list_run_corridors(run_id: int, db: Session = Depends(get_db)):
+    if not db.get(CorridorRun, run_id):
+        raise HTTPException(404, "corridor run not found")
+    rows = list(
+        db.execute(
+            select(Corridor).where(Corridor.run_id == run_id).order_by(Corridor.rank)
+        ).scalars()
+    )
+    return schemas.CorridorList(total=len(rows), corridors=[_corridor_out(c) for c in rows])
+
+
+@router.get(
+    "/corridor-runs/{run_id}/unattributed",
+    response_model=schemas.UnattributedList,
+    tags=["corridors"],
+    summary="Events in the window no corridor claimed, with reasons",
+)
+def list_unattributed(run_id: int, db: Session = Depends(get_db)):
+    if not db.get(CorridorRun, run_id):
+        raise HTTPException(404, "corridor run not found")
+    rows = list(
+        db.execute(
+            select(CorridorUnattributed)
+            .where(CorridorUnattributed.run_id == run_id)
+            .order_by(CorridorUnattributed.event_id)
+        ).scalars()
+    )
+    return schemas.UnattributedList(
+        run_id=run_id,
+        total=len(rows),
+        events=[
+            schemas.UnattributedOut(event_id=r.event_id, reason=r.reason, detail=r.detail_json or {})
+            for r in rows
+        ],
+    )
+
+
+def _corridor_out(corridor: Corridor) -> schemas.CorridorOut:
+    return schemas.CorridorOut(
+        id=corridor.id,
+        run_id=corridor.run_id,
+        corridor_key=corridor.corridor_key,
+        score=corridor.score,
+        rank=corridor.rank,
+        tie_group=corridor.tie_group,
+        status=corridor.status,
+        event_count=corridor.event_count,
+        first_emission=iso(corridor.first_emission_us),
+        last_emission=iso(corridor.last_emission_us),
+    )
+
+
+def _confirmation_out(row: CorridorConfirmation) -> schemas.CorridorConfirmationOut:
+    return schemas.CorridorConfirmationOut(
+        id=row.id,
+        corridor_id=row.corridor_id,
+        confirmed_by=row.confirmed_by,
+        note=row.note,
+        active=row.active,
+        status=row.status,
+        conflict=row.conflict_json,
+        created_at=iso(row.created_at_us),
+        updated_at=iso(row.updated_at_us),
+    )
+
+
+@router.get(
+    "/corridors/{corridor_id}",
+    response_model=schemas.CorridorDetail,
+    tags=["corridors"],
+    summary="Corridor detail: linked events, edge constraints, competitors, gaps",
+)
+def get_corridor(corridor_id: int, db: Session = Depends(get_db)):
+    corridor = db.get(Corridor, corridor_id)
+    if not corridor:
+        raise HTTPException(404, "corridor not found")
+    members = list(
+        db.execute(
+            select(CorridorEvent)
+            .where(CorridorEvent.corridor_id == corridor.id)
+            .order_by(CorridorEvent.seq)
+        ).scalars()
+    )
+    competitors = list(
+        db.execute(
+            select(CorridorCompetitor)
+            .where(CorridorCompetitor.corridor_id == corridor.id)
+            .order_by(CorridorCompetitor.seq)
+        ).scalars()
+    )
+    confirmations = list(
+        db.execute(
+            select(CorridorConfirmation).where(CorridorConfirmation.corridor_id == corridor.id)
+        ).scalars()
+    )
+    # The observations this corridor's solution did *not* attribute: the
+    # run-level unattributed events, so each corridor account is complete
+    # (所串联事件、可达约束、竞争事件、未归属观测).
+    unattributed = list(
+        db.execute(
+            select(CorridorUnattributed)
+            .where(CorridorUnattributed.run_id == corridor.run_id)
+            .order_by(CorridorUnattributed.event_id)
+        ).scalars()
+    )
+    notes = corridor.notes_json or {}
+    base = _corridor_out(corridor).model_dump()
+    return schemas.CorridorDetail(
+        **base,
+        members=[
+            schemas.CorridorMemberOut(seq=m.seq, event_id=m.event_id, edge_to_next=m.edge_json)
+            for m in members
+        ],
+        competitors=[
+            schemas.CorridorCompetitorOut(
+                seq=c.seq,
+                event_id=c.event_id,
+                replaces_event_id=c.replaces_event_id,
+                delta_score=c.delta_score,
+                reason=c.reason,
+            )
+            for c in competitors
+        ],
+        gaps=notes.get("gaps", []),
+        unattributed=[
+            schemas.UnattributedOut(event_id=u.event_id, reason=u.reason, detail=u.detail_json or {})
+            for u in unattributed
+        ],
+        confirmations=[_confirmation_out(c) for c in confirmations],
+    )
+
+
+@router.post(
+    "/corridors/{corridor_id}/confirm",
+    response_model=schemas.CorridorConfirmationOut,
+    status_code=201,
+    tags=["corridors"],
+    summary="Manually confirm a corridor candidate",
+)
+def confirm_corridor(
+    corridor_id: int, body: schemas.CorridorConfirmRequest, db: Session = Depends(get_db)
+):
+    corridor = db.get(Corridor, corridor_id)
+    if not corridor:
+        raise HTTPException(404, "corridor not found")
+    try:
+        confirmation = corridor_pipeline.confirm_corridor(
+            db, corridor, body.confirmed_by, body.note
+        )
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    db.commit()
+    return _confirmation_out(confirmation)
+
+
+@router.delete(
+    "/corridors/{corridor_id}/confirm",
+    response_model=schemas.CorridorConfirmationOut,
+    tags=["corridors"],
+    summary="Manually revoke a confirmation (the only way a confirmation goes away)",
+)
+def revoke_corridor_confirmation(
+    corridor_id: int,
+    actor: str = Query("investigator"),
+    db: Session = Depends(get_db),
+):
+    corridor = db.get(Corridor, corridor_id)
+    if not corridor:
+        raise HTTPException(404, "corridor not found")
+    try:
+        confirmation = corridor_pipeline.revoke_confirmation(db, corridor, actor)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    db.commit()
+    return _confirmation_out(confirmation)

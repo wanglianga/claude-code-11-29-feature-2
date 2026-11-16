@@ -275,6 +275,8 @@
       ]
     }
   ],
+  "tracks": [],
+  "corridor": {},
   "waves": [
     {
       "station_id": "S1",

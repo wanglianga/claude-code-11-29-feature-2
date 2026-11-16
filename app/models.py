@@ -350,3 +350,164 @@ class AuditLog(Base):
     target_id: Mapped[str | None] = mapped_column(String(64))
     detail: Mapped[dict | None] = mapped_column(JSONB)
     created_at_us: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+# --------------------------------------------------------------------------- #
+# Activity corridors (通道候选集)
+#
+# A corridor is an *anonymous* candidate explanation: "these events could be
+# one passage through the survey area under this constraint book".  It never
+# names an individual animal and never interpolates a position inside a gap —
+# the only positions it exposes are the events' own feasible regions.
+# --------------------------------------------------------------------------- #
+class ConstraintBook(Base):
+    """A versioned, immutable bundle of movement constraints (约束册).
+
+    Contents: seasonal speed limits, impassable zones, listening blind zones
+    and cross-station clock-sync uncertainty.  Books are never edited in
+    place: a change is a new row with the same ``name`` and ``version + 1``,
+    so every corridor run can pin the exact constraint version it used.
+    """
+
+    __tablename__ = "constraint_books"
+    __table_args__ = (
+        UniqueConstraint("name", "version", name="uq_constraint_book_version"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    version_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    default_max_speed_mps: Mapped[float] = mapped_column(Float, nullable=False)
+    seasonal_speed_limits_json: Mapped[list] = mapped_column(JSONB, nullable=False)
+    impassable_zones_json: Mapped[list] = mapped_column(JSONB, nullable=False)
+    blind_zones_json: Mapped[list] = mapped_column(JSONB, nullable=False)
+    clock_uncertainties_json: Mapped[list] = mapped_column(JSONB, nullable=False)
+    default_clock_uncertainty_us: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str] = mapped_column(String(128), nullable=False, default="investigator")
+    created_at_us: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class CorridorRun(Base):
+    """One corridor-solving pass over a frozen event window."""
+
+    __tablename__ = "corridor_runs"
+    __table_args__ = (
+        UniqueConstraint("batch_id", name="uq_corridor_run_batch"),
+        Index("ix_corridor_runs_window", "window_start_us", "window_end_us"),
+        Index("ix_corridor_runs_status", "status", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    batch_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    method: Mapped[str] = mapped_column(String(24), nullable=False)  # mincost_flow | hypothesis_pruning
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
+    window_start_us: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    window_end_us: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    constraint_book_id: Mapped[int] = mapped_column(ForeignKey("constraint_books.id"), nullable=False)
+    constraint_version_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    params_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    event_snapshot_json: Mapped[list] = mapped_column(JSONB, nullable=False)
+    summary_json: Mapped[dict | None] = mapped_column(JSONB)
+    stale_reason: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str | None] = mapped_column(String(128))
+    created_at_us: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    finished_at_us: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class Corridor(Base):
+    """One candidate activity corridor (no individual identity attached)."""
+
+    __tablename__ = "corridors"
+    __table_args__ = (
+        UniqueConstraint("run_id", "corridor_key", name="uq_corridor_key"),
+        Index("ix_corridors_run", "run_id", "rank"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("corridor_runs.id"), nullable=False)
+    corridor_key: Mapped[str] = mapped_column(String(32), nullable=False)
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    tie_group: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="candidate")
+    event_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    first_emission_us: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    last_emission_us: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    notes_json: Mapped[list | None] = mapped_column(JSONB)
+    created_at_us: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class CorridorEvent(Base):
+    """One member event of a corridor plus the explained edge to the next one."""
+
+    __tablename__ = "corridor_events"
+    __table_args__ = (
+        UniqueConstraint("corridor_id", "seq", name="uq_corridor_event_seq"),
+        Index("ix_corridor_events_event", "event_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    corridor_id: Mapped[int] = mapped_column(ForeignKey("corridors.id", ondelete="CASCADE"), nullable=False)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=False)
+    # Explanation of the edge from this member to the next (null on the last
+    # member): time/distance/speed ranges, the exact constraint rules applied
+    # and the feature evidence.  Never a position: gaps carry no coordinates.
+    edge_json: Mapped[dict | None] = mapped_column(JSONB)
+
+
+class CorridorCompetitor(Base):
+    """An event that could replace a corridor member at near-equal score."""
+
+    __tablename__ = "corridor_competitors"
+    __table_args__ = (
+        UniqueConstraint("corridor_id", "seq", "event_id", name="uq_corridor_competitor"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    corridor_id: Mapped[int] = mapped_column(ForeignKey("corridors.id", ondelete="CASCADE"), nullable=False)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=False)
+    replaces_event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=False)
+    delta_score: Mapped[float] = mapped_column(Float, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class CorridorUnattributed(Base):
+    """An event inside the window that no corridor claimed, with the reason."""
+
+    __tablename__ = "corridor_unattributed"
+    __table_args__ = (
+        UniqueConstraint("run_id", "event_id", name="uq_corridor_unattributed"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("corridor_runs.id"), nullable=False)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=False)
+    reason: Mapped[str] = mapped_column(String(48), nullable=False)
+    detail_json: Mapped[dict | None] = mapped_column(JSONB)
+
+
+class CorridorConfirmation(Base):
+    """An investigator's manual confirmation of a corridor candidate.
+
+    Confirmations are never auto-revoked: when newer evidence contradicts a
+    confirmed corridor the confirmation is kept and flagged ``conflicted``
+    with the contradicting detail, so the conflict stays visible until a
+    human resolves it.
+    """
+
+    __tablename__ = "corridor_confirmations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    corridor_id: Mapped[int] = mapped_column(ForeignKey("corridors.id", ondelete="CASCADE"), nullable=False)
+    confirmed_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="active")
+    conflict_json: Mapped[dict | None] = mapped_column(JSONB)
+    created_at_us: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    updated_at_us: Mapped[int] = mapped_column(BigInteger, nullable=False)
